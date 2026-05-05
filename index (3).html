@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <link rel="stylesheet" href="style.css">
+  <title>💸 Student Expense Tracker</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+  
+</head>
+<body>
+
+<header>
+  <div class="header-left">
+    <h1>Student <span>Expense</span><br>Tracker</h1>
+    <p>// track · analyse · survive college</p>
+  </div>
+  <div style="display:flex;flex-direction:column;align-items:flex-end;gap:0.75rem">
+    <span class="mode-badge local" id="modeBadge">● offline mode</span>
+    <div class="stats-bar" id="statsBar">
+      <div class="stat-pill">
+        <span class="label">Total Spent</span>
+        <span class="value" id="statTotal">₹0.00</span>
+      </div>
+      <div class="stat-pill">
+        <span class="label">Entries</span>
+        <span class="value" id="statCount">0</span>
+      </div>
+      <div class="stat-pill">
+        <span class="label">Top Category</span>
+        <span class="value" id="statTop">—</span>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main>
+  <!-- ADD FORM -->
+  <aside class="form-panel">
+    <div class="panel-title">New Expense</div>
+
+    <div class="field">
+      <label>What did you spend on?</label>
+      <input type="text" id="title" placeholder="e.g. Chai & Samosa" maxlength="60" />
+    </div>
+
+    <div class="input-row">
+      <div class="field">
+        <label>Amount (₹)</label>
+        <div class="amount-wrap">
+          <span>₹</span>
+          <input type="number" id="amount" placeholder="0.00" min="0" step="0.01" />
+        </div>
+      </div>
+      <div class="field">
+        <label>Date</label>
+        <input type="date" id="date" />
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Category</label>
+      <select id="category">
+        <option value="Food">🍕 Food</option>
+        <option value="Coffee">☕ Coffee</option>
+        <option value="Travel">🚗 Travel</option>
+        <option value="Shopping">🛍️ Shopping</option>
+        <option value="Entertainment">🎮 Entertainment</option>
+        <option value="Other">📦 Other</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label>Note (optional)</label>
+      <textarea id="note" placeholder="e.g. Shared with Rahul"></textarea>
+    </div>
+
+    <button class="btn-add" id="addBtn" onclick="addExpense()">+ Add Expense</button>
+  </aside>
+
+  <!-- LIST -->
+  <section class="list-panel">
+    <div class="list-header">
+      <h2>Expenses</h2>
+      <span class="count-badge" id="countBadge">0 items</span>
+    </div>
+
+    <div class="filter-tabs" id="filterTabs">
+      <button class="tab active" data-cat="All" onclick="setFilter('All', this)">All</button>
+      <button class="tab" data-cat="Food" onclick="setFilter('Food', this)">🍕 Food</button>
+      <button class="tab" data-cat="Coffee" onclick="setFilter('Coffee', this)">☕ Coffee</button>
+      <button class="tab" data-cat="Travel" onclick="setFilter('Travel', this)">🚗 Travel</button>
+      <button class="tab" data-cat="Shopping" onclick="setFilter('Shopping', this)">🛍️ Shopping</button>
+      <button class="tab" data-cat="Entertainment" onclick="setFilter('Entertainment', this)">🎮 Entertainment</button>
+      <button class="tab" data-cat="Other" onclick="setFilter('Other', this)">📦 Other</button>
+    </div>
+
+    <div class="expense-list" id="expenseList">
+      <div class="loading"><div class="spinner"></div> Loading...</div>
+    </div>
+    <footer class="footer">
+  <p>© 2026 Divish. All rights reserved.</p>
+  <p>📞 +91 99943050XX</p>
+  <p>
+    🌐 <a href="https://divish-k.vercel.app/" target="_blank">
+      View Portfolio
+    </a>
+  </p>
+</footer>
+  </section>
+</main>
+
+<div id="toast"></div>
+
+<script>
+  const API = 'http://localhost:5000/api/expenses';
+  let allExpenses = [];
+  let activeFilter = 'All';
+  let useLocalStorage = false;
+
+  const LS_KEY = 'student_expenses';
+
+  const CAT_COLORS = {
+    Food: '#ff6b4a',
+    Coffee: '#f0c040',
+    Travel: '#4af0c4',
+    Shopping: '#c47af0',
+    Entertainment: '#4a8ff0',
+    Other: '#7a7a8c'
+  };
+
+  // ── Set default date to today ──
+  document.getElementById('date').value = new Date().toISOString().split('T')[0];
+
+  // ── LocalStorage helpers ──
+  function lsLoad() {
+    try { return JSON.parse(localStorage.getItem(LS_KEY)) || []; }
+    catch { return []; }
+  }
+  function lsSave(data) {
+    localStorage.setItem(LS_KEY, JSON.stringify(data));
+  }
+  function lsAdd(expense) {
+    const id = 'local_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+    const item = { _id: id, ...expense, createdAt: new Date().toISOString() };
+    const data = lsLoad();
+    data.unshift(item);
+    lsSave(data);
+    return item;
+  }
+  function lsDelete(id) {
+    const data = lsLoad().filter(e => e._id !== id);
+    lsSave(data);
+  }
+
+  // ── Fetch expenses ──
+  async function fetchExpenses() {
+    try {
+      const res = await fetch(API, { signal: AbortSignal.timeout(3000) });
+      if (!res.ok) throw new Error('Server error');
+      allExpenses = await res.json();
+      useLocalStorage = false;
+      document.getElementById('modeBadge').className = 'mode-badge server';
+      document.getElementById('modeBadge').textContent = '● server mode';
+      renderExpenses();
+      updateStats();
+    } catch (e) {
+      // Fall back to localStorage
+      useLocalStorage = true;
+      allExpenses = lsLoad();
+      document.getElementById('modeBadge').className = 'mode-badge local';
+      document.getElementById('modeBadge').textContent = '● offline mode';
+      renderExpenses();
+      updateStats();
+      if (allExpenses.length === 0) {
+        // Only show the hint if list is empty
+        document.getElementById('expenseList').innerHTML =
+          `<div class="empty-state">
+            <span class="emoji">🎓</span>
+            <p>No expenses yet — add your first one!<br>
+            <small style="opacity:0.5;font-size:0.7rem;margin-top:0.4rem;display:block">
+              Running in offline mode (data saved locally)
+            </small></p>
+          </div>`;
+      }
+    }
+  }
+
+  // ── Add expense ──
+  async function addExpense() {
+    const titleEl  = document.getElementById('title');
+    const amountEl = document.getElementById('amount');
+    const title    = titleEl.value.trim();
+    const amount   = parseFloat(amountEl.value);
+    const category = document.getElementById('category').value;
+    const date     = document.getElementById('date').value;
+    const note     = document.getElementById('note').value.trim();
+
+    // Validate with shake animation
+    if (!title) {
+      titleEl.classList.add('shake');
+      setTimeout(() => titleEl.classList.remove('shake'), 400);
+      return showToast('Enter a title!', true);
+    }
+    if (!amount || amount <= 0) {
+      amountEl.classList.add('shake');
+      setTimeout(() => amountEl.classList.remove('shake'), 400);
+      return showToast('Enter a valid amount!', true);
+    }
+
+    const btn = document.getElementById('addBtn');
+    btn.disabled = true;
+    btn.textContent = 'Adding...';
+
+    try {
+      let saved;
+      if (useLocalStorage) {
+        saved = lsAdd({ title, amount, category, date, note });
+        allExpenses.unshift(saved);
+      } else {
+        const res = await fetch(API, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title, amount, category, date, note })
+        });
+        if (!res.ok) throw new Error();
+        saved = await res.json();
+        allExpenses.unshift(saved);
+      }
+
+      renderExpenses();
+      updateStats();
+
+      // Reset form
+      document.getElementById('title').value = '';
+      document.getElementById('amount').value = '';
+      document.getElementById('note').value = '';
+
+      // Burst animation on the add button
+      btn.classList.add('burst');
+      setTimeout(() => btn.classList.remove('burst'), 500);
+
+      showToast('✓ Expense added');
+    } catch {
+      showToast('Failed to add expense', true);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '+ Add Expense';
+    }
+  }
+
+  // ── Delete expense ──
+  async function deleteExpense(id, el) {
+    el.disabled = true;
+
+    // Find card and animate out
+    const card = el.closest('.expense-card');
+    if (card) card.classList.add('removing');
+
+    await new Promise(r => setTimeout(r, 280));
+
+    try {
+      if (useLocalStorage) {
+        lsDelete(id);
+      } else {
+        const res = await fetch(`${API}/${id}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error();
+      }
+      allExpenses = allExpenses.filter(e => e._id !== id);
+      renderExpenses();
+      updateStats();
+      showToast('✓ Deleted');
+    } catch {
+      showToast('Delete failed', true);
+      if (card) card.classList.remove('removing');
+      el.disabled = false;
+    }
+  }
+
+  // ── Render expenses ──
+  function renderExpenses() {
+    const list = document.getElementById('expenseList');
+    const filtered = activeFilter === 'All'
+      ? allExpenses
+      : allExpenses.filter(e => e.category === activeFilter);
+
+    const badge = document.getElementById('countBadge');
+    badge.textContent = `${filtered.length} item${filtered.length !== 1 ? 's' : ''}`;
+
+    if (filtered.length === 0) {
+      list.innerHTML = `<div class="empty-state">
+        <span class="emoji">${allExpenses.length === 0 ? '🎓' : '🔍'}</span>
+        <p>${allExpenses.length === 0
+          ? 'No expenses yet.<br>Add your first one!'
+          : 'No expenses in this category.'}</p>
+      </div>`;
+      return;
+    }
+
+    list.innerHTML = filtered.map(e => {
+      const color = CAT_COLORS[e.category] || CAT_COLORS.Other;
+      const d = e.date ? new Date(e.date) : new Date(e.createdAt || Date.now());
+      const date = d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+      return `
+        <div class="expense-card">
+          <div class="cat-dot" style="background:${color}"></div>
+          <div class="card-body">
+            <div class="card-title">${escHtml(e.title)}</div>
+            <div class="card-meta">
+              <span>${e.category}</span>
+              <span>${date}</span>
+            </div>
+            ${e.note ? `<div class="card-note">${escHtml(e.note)}</div>` : ''}
+          </div>
+          <div class="card-amount">₹${parseFloat(e.amount).toFixed(2)}</div>
+          <button class="btn-delete" title="Delete" onclick="deleteExpense('${e._id}', this)">✕</button>
+        </div>`;
+    }).join('');
+  }
+
+  // ── Update stats with animation ──
+  function updateStats() {
+    const total = allExpenses.reduce((s, e) => s + e.amount, 0);
+
+    animateStat('statTotal', `₹${total.toFixed(2)}`);
+    animateStat('statCount', allExpenses.length);
+
+    const bycat = allExpenses.reduce((acc, e) => {
+      acc[e.category] = (acc[e.category] || 0) + e.amount; return acc;
+    }, {});
+    const top = Object.entries(bycat).sort((a, b) => b[1] - a[1])[0];
+    animateStat('statTop', top ? top[0] : '—');
+  }
+
+  function animateStat(id, newVal) {
+    const el = document.getElementById(id);
+    if (el.textContent !== String(newVal)) {
+      el.classList.remove('updating');
+      void el.offsetWidth; // force reflow
+      el.classList.add('updating');
+      el.textContent = newVal;
+      setTimeout(() => el.classList.remove('updating'), 300);
+    }
+  }
+
+  // ── Filter ──
+  function setFilter(cat, el) {
+    activeFilter = cat;
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    el.classList.add('active');
+    renderExpenses();
+  }
+
+  // ── Toast ──
+  function showToast(msg, isError = false) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className = isError ? 'error show' : 'show';
+    setTimeout(() => t.className = isError ? 'error' : '', 2500);
+  }
+
+  function escHtml(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  // ── Enter key to submit ──
+  document.getElementById('title').addEventListener('keydown', e => {
+    if (e.key === 'Enter') addExpense();
+  });
+
+  // ── Init ──
+  fetchExpenses();
+</script>
+</body>
+</html>
